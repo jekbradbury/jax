@@ -26,7 +26,7 @@ from ..linear_util import thunk, transformation, transformation_with_aux
 from ..util import unzip2, safe_zip, safe_map, toposort, partial
 from ..core import (Trace, Tracer, new_master, Jaxpr, JaxprEqn, get_aval, pack,
                     AbstractValue, AbstractTuple, unit, unitvar, Primitive,
-                    call_p)
+                    call_p, GlobalFreeVar)
 
 map = safe_map
 zip = safe_zip
@@ -51,7 +51,6 @@ class JaxprTrace(Trace):
     return JaxprTracer(self, PartialVal((get_aval(val), unit)), ConstVar(val))
 
   def new_arg(self, pval):
-    _, const = pval
     return JaxprTracer(self, pval, LambdaBinding())
 
   def instantiate_const(self, tracer):
@@ -60,6 +59,8 @@ class JaxprTrace(Trace):
       return tracer
     elif isinstance(pv, JaxprTracerTuple):
       return pack(map(lambda t: self.instantiate_const(self.full_raise(t)), tracer))
+    elif isinstance(tracer.recipe, FreeVar):
+        return tracer
     elif pv is None:
       return self.new_instantiated_const(const)
     else:
@@ -341,10 +342,10 @@ def trace_to_jaxpr(fun, pvals, **kwargs):
   with new_master(JaxprTrace) as master:
     fun = trace_to_subjaxpr(fun, master)
     jaxpr, (out_pval, consts, env) = fun.call_wrapped(pvals, **kwargs)
-    assert not env
+    # assert not env
     del master
 
-  return jaxpr, out_pval, consts
+  return jaxpr, out_pval, consts, env
 
 @transformation
 def trace_to_subjaxpr(master, pvals):

@@ -136,7 +136,8 @@ def full_lower(val):
 
 def find_top_trace(xs):
  try:
-   top_trace = max((x.trace for x in xs if isinstance(x, Tracer)),
+   top_trace = max((x.trace for x in xs if isinstance(x, Tracer)
+                                        and not isinstance(x, GlobalFreeVar)),
                    key=attrgetter('level'))
  except ValueError:
    return None
@@ -154,7 +155,10 @@ class Trace(object):
     self.sublevel = sublevel
 
   def full_raise(self, val):
-    if not isinstance(val, Tracer):
+    if isinstance(val, GlobalFreeVar):
+      val.val._ref = ref(val)
+      return self.sublift(self.pure(val.val))
+    elif not isinstance(val, Tracer):
       return self.pure(val)
     level = self.level
     sublevel = self.sublevel
@@ -287,6 +291,15 @@ class Tracer(object):
 
   def __repr__(self):
     return 'Traced<{}>with<{}>'.format(self.aval, self.trace)
+
+class GlobalFreeVar(Tracer):
+  trace = 'GlobalFreeVar'
+  def __init__(self, val):
+    self.val = val
+
+  @property
+  def aval(self):
+    return self.val
 
 
 # these can be used to set up forwarding of properties and instance methods from

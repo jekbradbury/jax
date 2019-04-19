@@ -718,7 +718,9 @@ def make_jaxpr(fun):
     jax_args, in_trees = unzip2(map(pytree_to_jaxtupletree, args))
     jaxtree_fun, out_tree = pytree_fun_to_jaxtupletree_fun(wrapped, in_trees)
     pvals = map(pv_like, jax_args)
-    jaxpr, _, _ = pe.trace_to_jaxpr(jaxtree_fun, pvals, **kwargs)
+    jaxpr, _, _, env = pe.trace_to_jaxpr(jaxtree_fun, pvals, **kwargs)
+    if len(env) > 0:
+      return jaxpr, env
     return jaxpr
 
   jaxpr_maker.__name__ = "make_jaxpr({})".format(jaxpr_maker.__name__)
