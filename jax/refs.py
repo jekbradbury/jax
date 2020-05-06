@@ -21,6 +21,7 @@ allowing more ergonomic user code, while retaining a functional core.
 
 from . import core
 from . import linear_util as lu
+from .interpreters import partial_eval as pe
 from .tree_util import tree_map, tree_multimap
 from .util import partial
 
@@ -42,10 +43,25 @@ class Ref(threading.local):
   def load(self, allow_no_value=False):
     if not allow_no_value and self.value is no_value:
       raise RuntimeError("Cannot load from empty ref.")
-    return self.value
+    value = self.value
+    # what to do when self.value is a Tracer?
+    trace_stack = core.trace_state.trace_stack
+    # what to do about the upward trace stack?
+    # which way to traverse the downward trace stack?
+    for master in trace_stack.downward:
+      trace = master.trace_type(master, core.cur_sublevel())
+      if isinstance(trace, pe.StagingJaxprTrace):
+        value = trace.new_ref(core.get_aval(value), self)
+    return value
 
   def store(self, value):
-    self.value = value
+    if isinstance(value, core.Tracer):
+      trace = value._trace
+      if isinstance(trace, pe.StagingJaxprTrace):
+        trace.add_out_ref(value, self)
+    # what to do with a nonempty trace stack?
+    else:
+      self.value = value
 
   # def swap(self, value):
   #   if self.value is no_value:

@@ -95,6 +95,7 @@ class PartialVal(tuple):
 #     transformations (e.g. in "initial-style" higher-order primitives, like
 #     for control flow). In this case we use the `JaxprTrace` class.
 class JaxprTrace(Trace):
+  out_refs = dict()
   def pure(self, val):
     return self.new_const(val)
 
@@ -117,6 +118,12 @@ class JaxprTrace(Trace):
 
   def new_arg(self, pval: PartialVal):
     return JaxprTracer(self, pval, LambdaBinding())
+
+  def new_ref(self, aval, ref):
+    return JaxprTracer(self, PartialVal.unknown(aval), RefVar(ref))
+
+  def add_out_ref(self, val, ref):
+    self.out_refs[ref] = val
 
   def instantiate_const(self, tracer):
     const = tracer.pval.get_known()
@@ -435,26 +442,29 @@ def trace_to_jaxpr(fun: lu.WrappedFun, pvals: Sequence[PartialVal],
   trace_type = trace_type or (StagingJaxprTrace if stage_out else JaxprTrace)
   with new_master(trace_type, bottom=bottom) as master:
     fun = trace_to_subjaxpr(fun, master, instantiate)
-    jaxpr, (out_pvals, consts, env) = fun.call_wrapped(pvals)
+    jaxpr, (out_pvals, consts, env, in_refs, out_refs) = fun.call_wrapped(pvals)
     assert not env
     del master
 
-  return jaxpr, out_pvals, consts
+  return jaxpr, out_pvals, consts, in_refs, out_refs
 
 @lu.transformation
 def trace_to_subjaxpr(master: core.MasterTrace, instantiate: Union[bool, Sequence[bool]],
                       pvals: Sequence[PartialVal]):
   assert all([isinstance(pv, PartialVal) for pv in pvals]), pvals
-  trace = JaxprTrace(master, core.cur_sublevel())
+  trace = master.trace_type(master, core.cur_sublevel())
   in_tracers = map(trace.new_arg, pvals)
   ans = yield in_tracers, {}
   instantiate = [instantiate] * len(ans) if isinstance(instantiate, bool) else instantiate
   out_tracers = map(trace.full_raise, map(core.full_lower, ans))
   out_tracers = map(partial(instantiate_const_at, trace), instantiate, out_tracers)
-  jaxpr, consts, env = tracers_to_jaxpr(in_tracers, out_tracers)
+  # how to instantiate out_ref_tracers
+  out_refs, out_ref_tracers = unzip2(trace.out_refs.items())
+  out_tracers = out_tracers + list(out_ref_tracers)
+  jaxpr, consts, env, in_refs = tracers_to_jaxpr(in_tracers, out_tracers)
   out_pvals = [t.pval for t in out_tracers]
   del trace, in_tracers, out_tracers
-  yield jaxpr, (out_pvals, consts, env)
+  yield jaxpr, (out_pvals, consts, env, in_refs, out_refs)
 
 def instantiate_const_at(trace, instantiate: bool, tracer):
   if instantiate:
@@ -465,6 +475,7 @@ def instantiate_const_at(trace, instantiate: bool, tracer):
 
 FreeVar = namedtuple('FreeVar', ['val'])
 ConstVar = namedtuple('ConstVar', ['val'])
+RefVar = namedtuple('RefVar', ['ref'])
 LambdaBinding = namedtuple('LambdaBinding', [])
 JaxprEqnRecipe = namedtuple('JaxprEqnRecipe',
                             ['eqn_id', 'invars', 'outvars', 'primitive', 'params'])
@@ -519,6 +530,7 @@ def tracers_to_jaxpr(in_tracers, out_tracers):
   eqns = []
   env = {}
   consts = {}
+  refs = {}
   const_to_var = {}
   def getconstvar(c):
     var = const_to_var.get(id(c))
@@ -544,6 +556,8 @@ def tracers_to_jaxpr(in_tracers, out_tracers):
       consts[v] = recipe.val
     elif isinstance(recipe, Literal):
       t_to_var[id(t)] = recipe
+    elif isinstance(recipe, RefVar):
+      refs[getvar(t)] = recipe.ref
     elif recipe is unit:
       t_to_var[id(t)] = unitvar
     else:
@@ -551,10 +565,11 @@ def tracers_to_jaxpr(in_tracers, out_tracers):
 
   env_vars, env_vals = unzip2(env.items())
   const_vars, const_vals = unzip2(consts.items())
+  ref_vars, refs = unzip2(refs.items())
   # The env_vars are pre-pended to the invars
-  jaxpr = Jaxpr(const_vars, list(it.chain(env_vars, invars)), list(map(getvar, out_tracers)), eqns)
+  jaxpr = Jaxpr(const_vars, list(it.chain(ref_vars, env_vars, invars)), list(map(getvar, out_tracers)), eqns)
   core.skip_checks or core.check_jaxpr(jaxpr)
-  return jaxpr, const_vals, env_vals
+  return jaxpr, const_vals, env_vals, refs
 
 @cache()
 def convert_constvars_jaxpr(jaxpr):

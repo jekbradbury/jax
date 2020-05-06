@@ -33,7 +33,7 @@ from ..abstract_arrays import (ConcreteArray, ShapedArray, AbstractToken,
 from ..core import Literal, pp_eqn_compact
 from ..pprint_util import pp
 from ..util import (partial, partialmethod, cache, prod, unzip2, memoize,
-                    extend_name_stack, wrap_name)
+                    extend_name_stack, wrap_name, split_list)
 from ..lib import xla_bridge as xb
 from ..lib import xla_client as xc
 from . import partial_eval as pe
@@ -481,12 +481,15 @@ def _xla_callable(fun: lu.WrappedFun, device, backend, name, *arg_specs):
 
   abstract_args, arg_devices = unzip2(arg_specs)
   pvals: Sequence[pe.PartialVal] = [pe.PartialVal.unknown(aval) for aval in abstract_args]
-  jaxpr, pvals, consts = pe.trace_to_jaxpr(
+  jaxpr, pvals, consts, in_refs, out_refs = pe.trace_to_jaxpr(
       fun, pvals, instantiate=False, stage_out=True, bottom=True)
+  abstract_refs = tuple(core.get_aval(r.value) for r in in_refs)
+  abstract_args = abstract_refs + abstract_args
 
   _map(prefetch, it.chain(consts, jaxpr_literals(jaxpr)))
 
   nreps = jaxpr_replicas(jaxpr)
+  # add ref device to this
   device = _xla_callable_device(nreps, backend, device, arg_devices)
   backend = device.platform if device else backend
   result_handlers = tuple(map(partial(_pval_to_result_handler, device), pvals))
@@ -495,7 +498,9 @@ def _xla_callable(fun: lu.WrappedFun, device, backend, name, *arg_specs):
   # which are often produced from partial evaluation, don't need compilation,
   # and don't need to force their (potentially lazy) arguments.
   if not jaxpr.eqns:
-    return partial(_execute_trivial, jaxpr, device, consts, result_handlers)
+    # execute_trivial for out_refs
+    return partial(_execute_trivial, jaxpr, device, consts, result_handlers,
+                   in_refs, out_refs)
 
   log_priority = logging.WARNING if FLAGS.jax_log_compiles else logging.DEBUG
   logging.log(log_priority, "Compiling %s for args %s.", fun.__name__, abstract_args)
@@ -529,9 +534,20 @@ def _xla_callable(fun: lu.WrappedFun, device, backend, name, *arg_specs):
   compiled = backend.compile(built, compile_options=options)
 
   if nreps == 1:
-    return partial(_execute_compiled, compiled, result_handlers)
+    execute = partial(_execute_compiled, compiled, result_handlers)
   else:
-    return partial(_execute_replicated, compiled, result_handlers)
+    execute = partial(_execute_replicated, compiled, result_handlers)
+  
+  def execute_with_refs(*args):
+    ref_vals = [r.value for r in in_refs]
+    assert all(core.get_aval(v) == aval for v, aval in zip(ref_vals, abstract_refs))
+    outs = execute(*ref_vals, *args)
+    ref_vals, outs = split_list(outs, [len(out_refs)])
+    for r, v in zip(out_refs, ref_vals):
+      r.value = v
+    return outs
+
+  return execute_with_refs
 
 def _xla_callable_device(nreps, backend, device, arg_devices):
   if nreps > 1:
@@ -587,14 +603,20 @@ def _execute_replicated(compiled, handlers, *args):
   if FLAGS.jax_debug_nans: check_nans(xla_call_p, out_bufs)
   return [handler(out_buf) for handler, out_buf in zip(handlers, out_bufs)]
 
-def _execute_trivial(jaxpr, device: Optional[Device], consts, handlers, *args):
+def _execute_trivial(jaxpr, device: Optional[Device], consts, handlers,
+                     in_refs, out_refs, *args):
   env = {core.unitvar: core.unit}
-  _map(env.setdefault, jaxpr.invars, args)
+  ref_vals = tuple(r.value for r in in_refs)
+  _map(env.setdefault, jaxpr.invars, ref_vals + args)
   _map(env.setdefault, jaxpr.constvars, consts)
   outs = [canonicalize_dtype(v.val) if type(v) is Literal else env[v]
           for v in jaxpr.outvars]
-  return [_copy_device_array_to_device(x, device) if type(x) is DeviceArray
+  outs = [_copy_device_array_to_device(x, device) if type(x) is DeviceArray
           else h(device_put(x, device)) for h, x in zip(handlers, outs)]
+  out_ref_vals, outs = split_list(outs, [len(out_refs)])
+  for r, v in zip(out_refs, out_ref_vals):
+    r.value = v
+  return outs
 
 @memoize
 def _get_device(device, backend):

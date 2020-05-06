@@ -37,6 +37,36 @@ import jax.numpy as jnp
 from jax.config import config
 config.parse_flags_with_absl()
 
+class AutoRefsTest(jtu.JaxTestCase):
+
+  def test_load(self):
+    ref = Ref()
+    def foo():
+      return ref.load()
+    ref.store(1.)
+    assert foo() == 1.
+    ref.store(2.)
+    assert foo() == 2.
+
+  def test_jit_load(self):
+    ref = Ref()
+    @jit
+    def foo():
+      return ref.load()
+    ref.store(1.)
+    assert foo() == 1.
+    ref.store(2.)
+    assert foo() == 2.
+
+  def test_jit_store(self):
+    ref = Ref()
+    @jit
+    def foo(x):
+      ref.store(x)
+    foo(1.)
+    assert ref.load() == 1.
+    foo(2.)
+    assert ref.load() == 2.
 
 class RefsTest(jtu.JaxTestCase):
 
