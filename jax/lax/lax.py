@@ -2035,7 +2035,7 @@ ad.defjvp2(sqrt_p, lambda g, ans, x: mul(g, div(_const(x, 0.5), ans)))
 rsqrt_p = standard_unop(_float | _complex, 'rsqrt')
 ad.defjvp2(rsqrt_p,
            lambda g, ans, x:
-           mul(g, mul(_const(x, -0.5), pow(x, _const(x, -1.5)))))
+           mul(g, mul(_const(x, -0.5), mul(mul(ans, ans), ans))))
 
 pow_p = standard_naryop([_float | _complex, _float | _complex], 'pow')
 
