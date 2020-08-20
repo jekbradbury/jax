@@ -341,7 +341,7 @@ class JaxprTracer(Tracer):
     if isinstance(const, Tracer) and const._trace.level >= trace.level:
       raise core.escaped_tracer_error(
           "Tracer from a higher level: {} in trace {}".format(const, trace))
-    self._trace = trace
+    super().__init__(trace)
     self.pval = pval
     self.recipe = recipe
 
@@ -843,12 +843,11 @@ def _move_to_front(lst: Sequence, to_move: Sequence[bool]) -> Sequence:
 
 
 class DynamicJaxprTracer(core.Tracer):
-  __slots__ = ['aval', 'line_info']
+  __slots__ = ['aval']
 
-  def __init__(self, trace, aval, line_info=None):
-    self._trace = trace
+  def __init__(self, trace, aval, source_info=None):
+    super().__init__(trace, source_info)
     self.aval = aval
-    self.line_info = line_info
 
   def full_lower(self):
     return self

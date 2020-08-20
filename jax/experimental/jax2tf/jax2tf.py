@@ -232,7 +232,7 @@ class TensorFlowTracer(core.Tracer):
   __slots__ = ["val"]
 
   def __init__(self, trace: 'TensorFlowTrace', val: TfValOrUnit):
-    self._trace = trace
+    super().__init__(trace)
     if val is core.unit:
       self.val = val
     elif isinstance(val, (tf.Tensor, tf.Variable)):

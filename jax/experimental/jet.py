@@ -88,7 +88,7 @@ class JetTracer(core.Tracer):
 
   def __init__(self, trace, primal, terms):
     assert type(terms) in (ZeroSeries, list, tuple)
-    self._trace = trace
+    super().__init__(trace)
     self.primal = primal
     self.terms = terms
 

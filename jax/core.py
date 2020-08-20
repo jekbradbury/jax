@@ -440,7 +440,7 @@ class UnexpectedTracerError(Exception): pass
 
 class Tracer:
   __array_priority__ = 1000
-  __slots__ = ['_trace', '__weakref__']
+  __slots__ = ['_trace', '__weakref__', '_source_info']
 
   def __array__(self, *args, **kw):
     msg = ("The numpy.ndarray conversion method __array__() was called on "
@@ -456,8 +456,9 @@ class Tracer:
            "`jax.device_put(x)[idx]`.")
     raise Exception(msg)
 
-  def __init__(self, trace: Trace):
+  def __init__(self, trace: Trace, source_info=None):
     self._trace = trace
+    self._source_info = source_info_util.current()
 
   def __iter__(self):
     return iter(self.aval._iter(self))

@@ -330,7 +330,7 @@ class JVPTracer(Tracer):
   def __init__(self, trace, primal, tangent):
     if not core.skip_checks:
       _primal_tangent_shapes_match(primal, tangent)
-    self._trace = trace
+    super().__init__(trace)
     self.primal = primal
     self.tangent = tangent
 

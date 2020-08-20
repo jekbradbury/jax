@@ -90,7 +90,7 @@ class BatchTracer(Tracer):
 
   def __init__(self, trace, val, batch_dim: Optional[int]):
     assert core.skip_checks or type(batch_dim) in (int, NotMapped)  # type: ignore
-    self._trace = trace
+    super().__init__(trace)
     self.val = val
     self.batch_dim = batch_dim
 
@@ -187,6 +187,7 @@ class BatchTrace(Trace):
     fun, out_dims1 = batch_subtrace(fun, self.master, in_dims)
     jvp, out_dims2 = batch_custom_jvp_subtrace(jvp, self.master, in_dims)
     out_vals = prim.bind(fun, jvp, *in_vals)
+    del fun, jvp
     fst, out_dims = lu.merge_linear_aux(out_dims1, out_dims2)
     if not fst:
       assert out_dims == out_dims[:len(out_dims) // 2] * 2
@@ -370,7 +371,9 @@ def batched_traceable(size, batched, instantiate, *vals):
     ans = yield map(partial(BatchTracer, trace), vals, in_dims), {}
     out_tracers = map(trace.full_raise, ans)
     out_vals, out_dims = unzip2((t.val, t.batch_dim) for t in out_tracers)
-    del master, out_tracers
+    del ans, out_tracers
+    del trace
+    del master
   if type(instantiate) is bool:
     instantiate = [instantiate] * len(out_vals)
   out_vals = [moveaxis(x, d, 0) if d is not not_mapped and d != 0

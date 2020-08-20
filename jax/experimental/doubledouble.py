@@ -39,7 +39,7 @@ _zero = _Zeros()
 
 class DoublingTracer(core.Tracer):
   def __init__(self, trace, head, tail):
-    self._trace = trace
+    super().__init__(trace)
     # TODO(vanderplas): check head/tail have matching shapes & dtypes
     self.head = head
     self.tail = tail

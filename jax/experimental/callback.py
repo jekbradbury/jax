@@ -122,7 +122,7 @@ class CallbackTracer(Tracer):
   __slots__ = ['val']
 
   def __init__(self, trace, val):
-    self._trace = trace
+    super().__init__(trace)
     self.val = val
 
   @property
