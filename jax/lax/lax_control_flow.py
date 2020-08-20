@@ -2442,13 +2442,13 @@ def omnistaging_enabler() -> None:
   global _initial_style_untyped_jaxpr, _initial_style_jaxpr, \
       _initial_style_jaxprs_with_common_consts
 
-  @cache()
+  # @cache()
   def _initial_style_untyped_jaxpr(fun: Callable, in_tree, in_avals):
     wrapped_fun, out_tree = flatten_fun_nokwargs(lu.wrap_init(fun), in_tree)
     jaxpr, out_avals, consts = pe.trace_to_jaxpr_dynamic(wrapped_fun, in_avals)
     return jaxpr, out_avals, consts, out_tree()
 
-  @cache()
+  # @cache()
   def _initial_style_jaxpr(fun: Callable, in_tree, in_avals):
     jaxpr, out_avals, consts, out_tree = \
         _initial_style_untyped_jaxpr(fun, in_tree, in_avals)

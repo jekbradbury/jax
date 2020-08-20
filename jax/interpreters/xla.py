@@ -214,10 +214,7 @@ def primitive_uses_outfeed(prim: core.Primitive, params: Dict) -> bool:
 
 def arg_spec(x):
   aval = abstractify(x)
-  try:
-    return aval, x._device
-  except:
-    return aval, None
+  return aval, getattr(x, '_device', None)
 
 def apply_primitive(prim, *args, **params):
   """Impl rule that compiles and runs a single primitive 'prim' using XLA."""

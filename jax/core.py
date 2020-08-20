@@ -18,6 +18,7 @@ from operator import attrgetter
 from contextlib import contextmanager, suppress
 from collections import namedtuple
 from functools import total_ordering
+import gc
 import itertools as it
 from weakref import ref
 import threading
@@ -36,8 +37,8 @@ from . import source_info_util
 from .util import safe_zip, safe_map, partial, curry, prod, partialmethod
 from .pprint_util import pp, vcat, PrettyPrint
 
-# TODO(dougalm): compilation cache breaks the leak detector. Consisder solving.
-check_leaks = False
+# TODO(dougalm): compilation cache breaks the leak detector. Consider solving.
+check_leaks = True
 
 # Disables internal invariant checks
 skip_checks = not FLAGS.jax_enable_checks  # not __debug__  # google doesn't use -O
@@ -437,6 +438,7 @@ def escaped_tracer_error(detail):
   return UnexpectedTracerError(msg.format(detail))
 
 class UnexpectedTracerError(Exception): pass
+class LeakedTracerError(Exception): pass
 
 class Tracer:
   __array_priority__ = 1000
@@ -708,11 +710,11 @@ def new_sublevel() -> Generator[None, None, None]:
   finally:
     thread_local_state.trace_state.substack.pop()
 
-  if check_leaks:
-    t = ref(sublevel)
-    del sublevel
-    if t() is not None:
-      raise Exception('Leaked sublevel {}'.format(t()))
+  # if check_leaks:
+  #   t = ref(sublevel)
+  #   del sublevel
+  #   if t() is not None:
+  #     raise Exception('Leaked sublevel {}'.format(t()))
 
 def full_lower(val):
   if isinstance(val, Tracer):
@@ -1528,11 +1530,19 @@ def omnistaging_enabler() -> None:
         stack.dynamic = prev_dynamic
 
     if check_leaks:
-      t = ref(master)
-      del master
-      if t() is not None:
-        print(thread_local_state.trace_state.trace_stack)
-        raise Exception('Leaked trace {}'.format(t()))
+      gc.collect()
+      #import refcycle; snapshot = refcycle.snapshot()
+      traces = [x for x in gc.get_referrers(master) if isinstance(x, Trace)]
+      tracers = {id(x): x for trace in traces for x in gc.get_referrers(trace)
+                 if isinstance(x, Tracer)}
+      tracers = list(tracers.values())
+      if tracers:
+        print({f'{str(type(a))}@{id(a)}': {f'{str(type(b))}@{id(b)}': {id(c): type(c) for c in gc.get_referrers(b)} for b in gc.get_referrers(a)} for a in gc.get_referrers(tracers.pop())})
+        #print(snapshot.ancestors(master,generations=10).to_dot())
+        msg = f'Leaked trace {master}.\nThe following tracers outlived the transformation:\n'
+        msg += "\n".join(f'{i+1}. {t}\ncreated at {source_info_util.summarize(t._source_info)}'
+                         for i, t in enumerate(tracers))
+        raise LeakedTracerError(msg)
 
   @contextmanager
   def new_base_master(trace_type: Type[Trace]) -> Generator[MasterTrace, None, None]:

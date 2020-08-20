@@ -55,6 +55,7 @@ def _add_args_(extra_args, left, *args, **kwargs):
   yield (yield args, kwargs)
 
 def _memoize(thunk):
+  # assert False
   cell = []
   saved_state = core.thread_local_state.trace_state.copy()
   def memoized():
@@ -65,7 +66,7 @@ def _memoize(thunk):
         cell.append(thunk())
       finally:
         core.thread_local_state.trace_state = prev_state
-    return cell[0]
+    return cell.pop() # cell[0]
   return memoized
 
 def _initial_style_jaxpr(fun, in_avals):

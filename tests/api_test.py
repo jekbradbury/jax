@@ -1346,29 +1346,18 @@ class APITest(jtu.JaxTestCase):
 
   def test_escaped_tracers_diffent_top_level_traces(self):
     api.jit(self.helper_save_tracer)(0.)
-    with self.assertRaisesRegex(
-        core.UnexpectedTracerError,
-        re.compile(
-          "Encountered an unexpected tracer.*Different traces at same level",
-          re.DOTALL)):
+    with self.assertRaises(core.LeakedTracerError):
       api.jit(lambda x: self._saved_tracer)(0.)
 
   def test_escaped_tracers_cant_lift_sublevels(self):
     api.jit(self.helper_save_tracer)(0.)
-    with self.assertRaisesRegex(
-        core.UnexpectedTracerError,
-        re.compile(
-          "Encountered an unexpected tracer.*Can't lift sublevels 1 to 0",
-          re.DOTALL)):
+    with self.assertRaises(core.LeakedTracerError):
       api.jit(lambda x: x)(self._saved_tracer)
 
   def test_escaped_tracers_tracer_from_higher_level(self):
-    api.grad(self.helper_save_tracer)(0.)
-    with self.assertRaisesRegex(
-        core.UnexpectedTracerError,
-        re.compile(
-          "Encountered an unexpected tracer.*Tracer from a higher level",
-          re.DOTALL)):
+    with self.assertRaises(core.LeakedTracerError):
+      api.grad(self.helper_save_tracer)(0.)
+      # TODO(jekbradbury): we don't need this:
       api.grad(lambda x: x)(self._saved_tracer)
 
   def test_escaped_tracers_incompatible_sublevel(self):
@@ -1376,20 +1365,14 @@ class APITest(jtu.JaxTestCase):
       api.jit(self.helper_save_tracer)(0.)
       # Use the tracer
       return x + self._saved_tracer
-    with self.assertRaisesRegex(
-        core.UnexpectedTracerError,
-        re.compile("Encountered an unexpected tracer",
-                   re.DOTALL)):
+    with self.assertRaises(core.LeakedTracerError):
       api.jit(func1)(2.)
 
   def test_escaped_tracers_cant_lift(self):
     def func1(x):
       api.grad(self.helper_save_tracer)(0.)
       return x + self._saved_tracer
-    with self.assertRaisesRegex(
-        core.UnexpectedTracerError,
-        re.compile("Encountered an unexpected tracer.*Can't lift",
-                   re.DOTALL)):
+    with self.assertRaises(core.LeakedTracerError):
       api.grad(func1)(2.)
 
   def test_escaped_tracers_not_among_input_tracers(self):
@@ -1398,11 +1381,7 @@ class APITest(jtu.JaxTestCase):
       # Use the tracer
       return x + self._saved_tracer
 
-    with self.assertRaisesRegex(
-        core.UnexpectedTracerError,
-        re.compile(
-          "Encountered an unexpected tracer.*Tracer not among input tracers",
-          re.DOTALL)):
+    with self.assertRaises(core.LeakedTracerError):
       api.jit(func1)(2.)
 
   def test_pmap_static_kwarg_error_message(self):

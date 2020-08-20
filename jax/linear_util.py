@@ -151,7 +151,9 @@ class WrappedFun(object):
     del args
     while stack:
       gen, out_store = stack.pop()
-      ans = gen.send(ans)
+      l = [ans]
+      del ans
+      ans = gen.send(l.pop())
       if out_store is not None:
         ans, side = ans
         out_store.store(side)
