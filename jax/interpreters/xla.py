@@ -388,6 +388,8 @@ def jaxpr_subcomp(c, jaxpr, backend, axis_env, consts, name_stack, *args):
 
   def write(v, node):
     assert node is not None
+    if v.aval not in (core.abstract_unit, core.abstract_token):
+      assert c.get_shape(node).dimensions() == v.aval.shape
     env[v] = node
 
   env = {}
@@ -427,6 +429,7 @@ def jaxpr_subcomp(c, jaxpr, backend, axis_env, consts, name_stack, *args):
 
     assert isinstance(ans, xe.XlaOp)
     c.get_shape(ans)  # force xla to do shape error checking
+    # TODO: make multiple results default and handled without tup/untup
     out_nodes = xla_destructure(c, ans) if eqn.primitive.multiple_results else [ans]
     c.clear_op_metadata()
     map(write, eqn.outvars, out_nodes)
@@ -893,13 +896,16 @@ def _array_aval_from_xla_shape(xla_shape):
   # This function instantiates the assumption that we can map fro XLA array
   # types to JAX array types.
   # TODO(mattjj): remove assumption can map XLA array types to JAX array types
+  # TODO(jekbradbury): one reason to remove that assumption is because
+  # we don't know what named axes the resulting aval should have.
   assert not xla_shape.is_tuple()
   return ShapedArray(xla_shape.dimensions(), xla_shape.numpy_dtype())
 
 def lower_fun_initial_style(fun):
   def f(c, axis_env, name_stack, avals, backend, *xla_args, **params):
     if config.omnistaging_enabled:
-      jaxpr, _, consts = pe.trace_to_jaxpr_dynamic(lu.wrap_init(fun, params), avals)
+      with core.replace_axis_env(zip(axis_env.names, axis_env.sizes)):
+        jaxpr, _, consts = pe.trace_to_jaxpr_dynamic(lu.wrap_init(fun, params), avals)
       outs = jaxpr_subcomp(c, jaxpr, backend, axis_env, _xla_consts(c, consts),
                           name_stack, *xla_args)
     else:
@@ -953,7 +959,7 @@ class DeviceArray:
 
     self._npy_value = None
     if not core.skip_checks:
-      assert type(aval) is ShapedArray
+      assert type(aval) is ShapedArray and aval.named_shape == {}
       npy_value = self._value
       assert npy_value.dtype == aval.dtype and npy_value.shape == aval.shape
       assert (device is None) or device is device_buffer.device()

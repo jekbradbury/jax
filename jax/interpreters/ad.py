@@ -155,7 +155,9 @@ def backward_pass(jaxpr: core.Jaxpr, consts, primals_in, cotangents_in):
       ct_env[v] = add_tangents(ct_env[v], ct) if v in ct_env else ct
       if not core.skip_checks:
         ct_aval = core.get_aval(ct_env[v])
-        assert v.aval == core.lattice_join(v.aval, ct_aval), (v.aval, ct_aval)
+        # TODO: promote named axes in lattice join
+        # TODO: what tests fail when we don't lattice join?
+        #assert v.aval == core.lattice_join(v.aval, ct_aval), (v.aval, ct_aval)
 
   def read_cotangent(v):
     return ct_env.get(v, Zero(v.aval))
@@ -349,7 +351,8 @@ def _primal_tangent_shapes_match(primal, tangent):
   if type(tangent) is not Zero:
     primal_aval = raise_to_shaped(get_aval(primal))
     tangent_aval = raise_to_shaped(get_aval(tangent))
-    assert primal_aval == tangent_aval, (primal_aval, tangent_aval)
+    assert (primal_aval.shape == tangent_aval.shape and
+            primal_aval.dtype == tangent_aval.dtype), (primal_aval, tangent_aval)
 
 call_param_updaters: Dict[core.Primitive, Callable] = {}
 call_transpose_param_updaters: Dict[core.Primitive, Callable] = {}
@@ -525,9 +528,13 @@ def map_transpose(primitive, params, call_jaxpr, args, ct, _):
   all_args, in_tree_def = tree_flatten(((), args, ct))  # empty consts
   fun = lu.hashable_partial(lu.wrap_init(backward_pass), call_jaxpr)
   fun, out_tree = flatten_fun_nokwargs(fun, in_tree_def)
+  mapped_outvars = [isinstance(outvar.aval, core.ShapedArray)
+                    and params['axis_name'] in outvar.aval.named_shape
+                    for outvar in call_jaxpr.outvars]
   new_mapped_invars = (*[m for m, x in zip(params['mapped_invars'], args)
                          if not is_undefined_primal(x)],
-                       *[True for x in ct if type(x) is not Zero])
+                       *[m for m, x in zip(mapped_outvars, ct)
+                         if type(x) is not Zero])
   new_params = dict(params, name=wrap_name(params['name'], 'transpose'),
                     mapped_invars=new_mapped_invars)
   update_params = call_transpose_param_updaters.get(primitive)
@@ -536,14 +543,6 @@ def map_transpose(primitive, params, call_jaxpr, args, ct, _):
                                [type(x) is not Zero for x in ct])
   out_flat = primitive.bind(fun, *all_args, **new_params)
   arg_cts = tree_unflatten(out_tree(), out_flat)
-
-  mapped_invars = params['mapped_invars']  # True for each mapped invar
-  # The freevars are being fanned out (not mapped). During transpose the
-  # dual of fan-out is fan-in-sum. We apply it to the unmapped invars.
-  assert len(mapped_invars) == len(arg_cts)
-  arg_cts = (arg_ct if arg_mapped or type(arg_ct) is Zero else arg_ct.sum(0)
-             for arg_ct, arg_mapped in zip(arg_cts, mapped_invars))
-
   return arg_cts
 
 
